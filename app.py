@@ -23,7 +23,7 @@ config = {
     #Collects stock price data
     "alpha_vantage": {
         "key": "CX2NAREQLV2VVYIV",
-        "symbol": "IBM",
+        "symbol": user_input,
         # Or use Compact for last 100 days
         "outputsize": "full",
         "key_adjusted_close": "4. close",
@@ -224,7 +224,7 @@ class LSTMModel(nn.Module):
 model = LSTMModel(input_size=config["model"]["input_size"], hidden_layer_size=config["model"]["lstm_size"], num_layers=config["model"]["num_lstm_layers"], output_size=1, dropout=config["model"]["dropout"])
 model = model.to(config["training"]["device"])
 
-model.load_state_dict(torch.load("IBM.pth"))
+model.load_state_dict(torch.load("" + user_input + ".pth"))
 
 # re-initialize to ensure, data isnt shuffled when presenting data
 train_dataloader = DataLoader(train_dataset, batch_size=config["training"]["batch_size"], shuffle=False)
