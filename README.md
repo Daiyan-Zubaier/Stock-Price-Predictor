@@ -93,15 +93,4 @@ The app provides the following charts:
 
 ---
 
-## 📄 License
-
-This project is licensed under the [MIT License](LICENSE).
-
----
-
-## 🙏 Acknowledgments
-
-- [Alpha Vantage API](https://www.alphavantage.co/)
-- [PyTorch](https://pytorch.org/)
-- [Streamlit](https://streamlit.io/)
 
