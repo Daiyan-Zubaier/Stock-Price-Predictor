@@ -1,4 +1,5 @@
 import numpy as np
+import os
 
 import torch
 import torch.nn as nn
@@ -20,9 +21,9 @@ user_input = st.text_input("Enter the stock symbol", "IBM")
 
 
 config = {
-    #Collects stock price data
+    # Collects stock price data
     "alpha_vantage": {
-        "key": "CX2NAREQLV2VVYIV",
+        "key": os.getenv("API_KEY"),
         "symbol": user_input,
         # Or use Compact for last 100 days
         "outputsize": "full",
