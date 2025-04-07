@@ -26,8 +26,11 @@ Simply enter the stock symbol below and let the magic happen! 🚀
 **NOTE:** IF you get an error, the daily limit for the website has been reached by other users.
 """)
 
-# User input for stock symbol
-user_input = st.text_input("Enter the stock symbol (e.g., IBM, AAPL, TSLA):", "IBM")
+# Predefined list of stock symbols
+stock_symbols = ["IBM", "AAPL", "TSLA"]  # Add more symbols here as needed
+
+# User input for stock symbol using a dropdown menu
+user_input = st.selectbox("Select the stock symbol:", stock_symbols)
 
 config = {
     "alpha_vantage": {
