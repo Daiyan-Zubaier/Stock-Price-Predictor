@@ -2,6 +2,7 @@
 
 This project predicts the next day's stock price using historical data and a Long Short-Term Memory (LSTM) neural network. It is built with PyTorch, Streamlit, and the Alpha Vantage API to fetch stock market data.
 
+In Progress: Currently working on migrating API to yfinance instead of AlphaVantage. 
 ---
 
 ## 🚀 Features
