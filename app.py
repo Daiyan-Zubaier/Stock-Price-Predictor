@@ -21,6 +21,9 @@ st.markdown("""
 Welcome to the **Stock Price Predictor**!  
 This app uses a pre-trained LSTM model to predict the next day's stock price based on historical data.  
 Simply enter the stock symbol below and let the magic happen! 🚀
+
+
+**NOTE:** IF you get an error, the daily limit for the website has been reached by other users.
 """)
 
 # User input for stock symbol
