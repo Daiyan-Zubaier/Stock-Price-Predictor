@@ -28,7 +28,7 @@ user_input = st.text_input("Enter the stock symbol (e.g., IBM, AAPL, TSLA):", "I
 
 config = {
     "alpha_vantage": {
-        "key": os.getenv("ALPHA_VANTAGE_API_KEY"),
+        "key": st.secrets["alpha_vantage"]["ALPHA_VANTAGE_API_KEY"],
         "symbol": user_input,
         "outputsize": "full",
         "key_adjusted_close": "4. close",
