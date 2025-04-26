@@ -3,15 +3,13 @@ import os
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from alpha_vantage.timeseries import TimeSeries
 import streamlit as st
 import requests
 import pandas as pd
 import logging
-from dotenv import load_dotenv
+import yfinance as yf
 
-# Load environment variables from .env file
-load_dotenv()
+
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -33,11 +31,8 @@ stock_symbols = ["IBM", "AAPL", "TSLA"]  # Add more symbols here as needed
 user_input = st.selectbox("Select the stock symbol:", stock_symbols)
 
 config = {
-    "alpha_vantage": {
-        "key": st.secrets["alpha_vantage"]["ALPHA_VANTAGE_API_KEY"],
+    "yahoo_finance": {
         "symbol": user_input,
-        "outputsize": "full",
-        "key_adjusted_close": "4. close",
     },
     "data": {
         "window_size": 20,
@@ -53,91 +48,114 @@ config = {
         "color_pred_test": "#FF4136",
     },
     "model": {
-        "input_size": 1,
-        "num_lstm_layers": 2,
-        "lstm_size": 32,
+        "input_size": 4,
+        "num_lstm_layers": 1,
+        "lstm_size": 64,
         "dropout": 0.2,
     },
     "training": {
         "device": "cpu",
         "batch_size": 64,
         "num_epoch": 100,
-        "learning_rate": 0.01,
-        "scheduler_step_size": 40,
+        "learning_rate": 0.001,
+        "scheduler_step_size": 50,
     }
 }
 
-def download_data(config):
-    if not config["alpha_vantage"]["key"]:
-        st.error("API key is missing. Please set your Alpha Vantage API key in the environment variable 'ALPHA_VANTAGE_API_KEY'.")
-        st.stop()
-
-    url = 'https://www.alphavantage.co/query'
-    params = {
-        'function': 'TIME_SERIES_DAILY',
-        'symbol': config["alpha_vantage"]["symbol"],
-        'outputsize': config["alpha_vantage"]["outputsize"],
-        'apikey': config["alpha_vantage"]["key"]
-    }
-    response = requests.get(url, params=params)
-    data = response.json()
-    if "Error Message" in data:
-        raise ValueError(data["Error Message"])
-    data_date = list(data['Time Series (Daily)'].keys())
-    data_date.reverse()
-    data_close_price = [float(data['Time Series (Daily)'][date]['4. close']) for date in data_date]
-    return data_date, np.array(data_close_price)
-
-try:
-    data_date, data_close_price = download_data(config)
-    st.subheader(f"📊 Historical Stock Prices for {user_input.upper()}")
-    st.line_chart(pd.DataFrame({"Date": data_date, "Close Price": data_close_price}).set_index("Date"))
-except ValueError as e:
-    st.error(f"Error fetching data: {e}")
-    st.stop()
-
-class Normalizer:
+class Normalizer():
     def __init__(self):
         self.mu = None
         self.sd = None
 
     def fit_transform(self, x):
-        self.mu = np.mean(x, axis=0, keepdims=True)
-        self.sd = np.std(x, axis=0, keepdims=True)
-        return (x - self.mu) / self.sd
+        self.mu = np.mean(x, axis=(0), keepdims=True)
+        self.sd = np.std(x, axis=(0), keepdims=True)
+        normalized_x = (x - self.mu)/self.sd
+        return normalized_x
 
     def inverse_transform(self, x):
-        return (x * self.sd) + self.mu
+        return (x*self.sd) + self.mu
 
-scaler = Normalizer()
-normalized_data_close_price = scaler.fit_transform(data_close_price)
+feature_scaler = Normalizer()
+label_scaler = Normalizer()
+
+def download_data(config):
+    symbol = config["yahoo_finance"]["symbol"]
+    
+    data = yf.download(symbol, period="max", interval="1d", progress=False)
+    recent_years = 20
+    total_years = data.index[-1].year - data.index[0].year + 1
+    cutoff_index = int(len(data) * (recent_years / total_years))
+    data = data[-cutoff_index:]
+
+    data["daily_return"] = data["Close"].pct_change()
+    data["7d_ma"] = data["Close"].rolling(window=7).mean()
+    data["30d_ma"] = data["Close"].rolling(window=30).mean()
+    data.dropna(inplace=True)
+
+    if data.empty:
+        raise ValueError(f"No data found for symbol {symbol}")
+
+    data_date = data.index.strftime('%Y-%m-%d').tolist()
+    data_close_price = data['Close'].values
+    data_close_price = np.array(data_close_price)
+
+    features_raw = data[["Close", "daily_return", "7d_ma", "30d_ma"]].values
+    labels_raw = data["Close"].values.reshape(-1, 1)
+    features = feature_scaler.fit_transform(features_raw)
+    labels = label_scaler.fit_transform(labels_raw)
+
+    num_data_points = len(data_date)
+    display_date_range = "from " + data_date[0] + " to " + data_date[-1]
+
+    print("Number data points:", num_data_points, display_date_range)
+
+    return data_date, data_close_price, features, labels, num_data_points, display_date_range
+
+try:
+    data_date, data_close_price, features, labels, num_data_points, display_date_range = download_data(config)
+    st.subheader(f"📊 Historical Stock Prices for {user_input.upper()}")
+    st.line_chart(pd.DataFrame({
+    "Date": data_date,
+    "Close Price": data_close_price.flatten()
+}).set_index("Date"))
+    model_path = os.path.join("./stock_models", f"{user_input}.pth")
+except ValueError as e:
+    st.error(f"Error fetching data: {e}")
+    st.stop()
 
 def prepare_data_x(x, window_size):
     n_row = x.shape[0] - window_size + 1
-    output = np.lib.stride_tricks.as_strided(x, shape=(n_row, window_size), strides=(x.strides[0], x.strides[0]))
+    output = np.lib.stride_tricks.as_strided(x, shape=(n_row, window_size, x.shape[1]), strides=(x.strides[0], x.strides[0], x.strides[1]))
     return output[:-1], output[-1]
 
+
 def prepare_data_y(x, window_size):
-    return x[window_size:]
+    output = x[window_size:]
+    return output
 
-data_x, data_x_unseen = prepare_data_x(normalized_data_close_price, config["data"]["window_size"])
-data_y = prepare_data_y(normalized_data_close_price, config["data"]["window_size"])
+features = feature_scaler.fit_transform(features)
 
-split_index = int(data_y.shape[0] * config["data"]["train_split_size"])
-data_x_train, data_x_val = data_x[:split_index], data_x[split_index:]
-data_y_train, data_y_val = data_y[:split_index], data_y[split_index:]
+data_x, data_x_unseen = prepare_data_x(features, window_size=config["data"]["window_size"])
+data_y = prepare_data_y(labels.flatten(), window_size=config["data"]["window_size"])
+
+split_index = int(data_y.shape[0]*config["data"]["train_split_size"])
+data_x_train = data_x[:split_index]
+data_x_val = data_x[split_index:]
+data_y_train = data_y[:split_index]
+data_y_val = data_y[split_index:]
 
 class StockDataset(Dataset):
     def __init__(self, x, y):
-        x = np.expand_dims(x, 2)
+        # expanding dimension of array, currently (batch, window), after (batch, window, features)
         self.x = x.astype(np.float32)
-        self.y = y.astype(np.float32)
+        self.y = y.astype(np.float32).reshape(-1, 1)
 
     def __len__(self):
         return len(self.y)
 
     def __getitem__(self, idx):
-        return self.x[idx], self.y[idx]
+        return self.x[idx], np.array([self.y[idx]], dtype=np.float32)
 
 train_dataset = StockDataset(data_x_train, data_y_train)
 val_dataset = StockDataset(data_x_val, data_y_val)
@@ -146,7 +164,7 @@ train_dataloader = DataLoader(train_dataset, batch_size=config["training"]["batc
 val_dataloader = DataLoader(val_dataset, batch_size=config["training"]["batch_size"], shuffle=True)
 
 class LSTMModel(nn.Module):
-    def __init__(self, input_size=1, hidden_layer_size=32, num_layers=2, output_size=1, dropout=0.2):
+    def __init__(self, input_size=4, hidden_layer_size=64, num_layers=1, output_size=1, dropout=0.2):
         super().__init__()
         self.hidden_layer_size = hidden_layer_size
         self.linear_1 = nn.Linear(input_size, hidden_layer_size)
@@ -157,13 +175,24 @@ class LSTMModel(nn.Module):
 
     def forward(self, x):
         batchsize = x.shape[0]
+
         x = self.linear_1(x)
         x = self.relu(x)
+
         lstm_out, (h_n, c_n) = self.lstm(x)
+
         x = h_n.permute(1, 0, 2).reshape(batchsize, -1)
+
         x = self.dropout(x)
         predictions = self.linear_2(x)
-        return predictions[:, -1]
+        return predictions
+
+#model_path = os.path.join("./stock_models", f"{user_input}.pth")
+
+if not os.path.exists(model_path):
+    st.error(f"Model file not found: {model_path}. Please ensure the model file exists for the stock symbol '{user_input}'.")
+    st.stop()
+
 
 model = LSTMModel(
     input_size=config["model"]["input_size"],
@@ -173,18 +202,12 @@ model = LSTMModel(
     dropout=config["model"]["dropout"]
 ).to(config["training"]["device"])
 
-model_path = os.path.join("./stock_models", f"{user_input}.pth")
-if not os.path.exists(model_path):
-    st.error(f"Model file not found: {model_path}. Please ensure the model file exists for the stock symbol '{user_input}'.")
-    st.stop()
-
 try:
-    model.load_state_dict(torch.load(model_path))
+    model.load_state_dict(torch.load(model_path, map_location=config["training"]["device"]))
+    model.eval()
 except Exception as e:
     st.error(f"Failed to load the model file: {model_path}. Error: {e}")
     st.stop()
-
-model.eval()
 
 def predict(dataloader):
     predictions = []
@@ -197,22 +220,22 @@ def predict(dataloader):
 predicted_train = predict(DataLoader(train_dataset, batch_size=config["training"]["batch_size"], shuffle=False))
 predicted_val = predict(DataLoader(val_dataset, batch_size=config["training"]["batch_size"], shuffle=False))
 
-next_day_price = scaler.inverse_transform(predicted_val[-1].reshape(-1, 1))[0][0]
+next_day_price = label_scaler.inverse_transform(predicted_val[-1].reshape(-1, 1))[0][0]
 st.subheader("📅 Predicted Price for the Next Day")
 st.write(f"The predicted price for **{user_input.upper()}** is: **${next_day_price:.2f}**")
 
 to_plot_data_y_train_pred = np.zeros(len(data_date))
 to_plot_data_y_val_pred = np.zeros(len(data_date))
 
-to_plot_data_y_train_pred[config["data"]["window_size"]:split_index + config["data"]["window_size"]] = scaler.inverse_transform(predicted_train)
-to_plot_data_y_val_pred[split_index + config["data"]["window_size"]:] = scaler.inverse_transform(predicted_val)
+to_plot_data_y_train_pred[config["data"]["window_size"]:split_index + config["data"]["window_size"]] = label_scaler.inverse_transform(predicted_train).flatten()
+to_plot_data_y_val_pred[split_index + config["data"]["window_size"]:] = label_scaler.inverse_transform(predicted_val).flatten()
 
 to_plot_data_y_train_pred = np.where(to_plot_data_y_train_pred == 0, None, to_plot_data_y_train_pred)
 to_plot_data_y_val_pred = np.where(to_plot_data_y_val_pred == 0, None, to_plot_data_y_val_pred)
 
 plot_data = pd.DataFrame({
     "Date": data_date,
-    "Actual Prices": pd.to_numeric(data_close_price, errors="coerce"),
+    "Actual Prices": pd.to_numeric(data_close_price.flatten(), errors="coerce"),
     "Predicted Prices (Train)": pd.to_numeric(to_plot_data_y_train_pred, errors="coerce"),
     "Predicted Prices (Validation)": pd.to_numeric(to_plot_data_y_val_pred, errors="coerce")
 })

@@ -3,5 +3,4 @@ torch
 pandas
 numpy
 requests
-alpha_vantage
-python-dotenv
+yfinance
