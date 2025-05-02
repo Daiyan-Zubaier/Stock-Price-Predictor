@@ -49,9 +49,9 @@ config = {
     },
     "model": {
         "input_size": 4,
-        "num_lstm_layers": 1,
+        "num_lstm_layers": 2,
         "lstm_size": 64,
-        "dropout": 0.2,
+        "dropout": 0.1,
     },
     "training": {
         "device": "cpu",
@@ -59,6 +59,7 @@ config = {
         "num_epoch": 100,
         "learning_rate": 0.001,
         "scheduler_step_size": 50,
+        "weight_decay": 1e-5
     }
 }
 
@@ -164,11 +165,19 @@ train_dataloader = DataLoader(train_dataset, batch_size=config["training"]["batc
 val_dataloader = DataLoader(val_dataset, batch_size=config["training"]["batch_size"], shuffle=True)
 
 class LSTMModel(nn.Module):
-    def __init__(self, input_size=4, hidden_layer_size=64, num_layers=1, output_size=1, dropout=0.2):
+    def __init__(self,input_size = config["model"]["input_size"], hidden_layer_size = config["model"]["lstm_size"], num_layers = config["model"]["num_lstm_layers"], output_size = 1, dropout = config["model"]["dropout"]):
         super().__init__()
+
+        input_size = config["model"]["input_size"]
+        hidden_layer_size = config["model"]["lstm_size"]
+        num_layers = config["model"]["num_lstm_layers"]
+        output_size = 1
+        dropout = config["model"]["dropout"]
+
         self.hidden_layer_size = hidden_layer_size
         self.linear_1 = nn.Linear(input_size, hidden_layer_size)
         self.relu = nn.ReLU()
+
         self.lstm = nn.LSTM(hidden_layer_size, hidden_size=self.hidden_layer_size, num_layers=num_layers, batch_first=True)
         self.dropout = nn.Dropout(dropout)
         self.linear_2 = nn.Linear(num_layers * hidden_layer_size, output_size)
